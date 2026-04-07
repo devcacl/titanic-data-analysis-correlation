@@ -1,92 +1,67 @@
-# 🧠 Titanic: Correlation and Cross-Tabulation Analysis
+# Titanic Data Analysis Correlation
 
-This project performs an **Exploratory Data Analysis (EDA)** on the classic **Titanic dataset**, focusing on the study of relationships between categorical variables through **visual correlation** and **cross-tabulation** techniques.
+Este repositorio ahora incluye una solución full-stack para explorar métricas agregadas del dataset Titanic.
 
-The main goal is to understand how factors such as **social class**, **gender**, and **ticket fare** influenced **passenger survival**.
+## Estructura
 
----
+- `backend/`: API en FastAPI con endpoints agregados y filtros.
+- `frontend/`: Aplicación Next.js + TypeScript responsive con navegación por secciones y tema claro/oscuro.
 
-## 📊 Key Concepts
+## Backend (FastAPI)
 
-### 🔹 Visual Correlation
-For categorical variables, a traditional numerical correlation coefficient is not appropriate.  
-Instead, **heatmaps** are used to visualize patterns, proportions, and relationships between categories.
+### Instalación
 
-Applied examples:
-- Survival proportion by passenger class.
-- Average ticket fare (`Fare`) by class.
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
-These visualizations help answer questions such as:
-- Did passengers in higher classes have a greater chance of survival?
-- Is ticket price directly related to social class?
+### Ejecución
 
----
+```bash
+uvicorn main:app --reload --port 8000
+```
 
-### 🔹 Cross-Tabulation (Crosstab)
-Cross-tabulation summarizes the relationship between two or more categorical variables using contingency tables.
+### Contrato API
 
-The project uses `pd.crosstab()` from **pandas** to:
-- Count occurrences across category combinations.
-- Calculate proportions and survival rates.
-- Create graphical representations such as heatmaps and bar charts.
+Todos los endpoints aceptan filtros opcionales según aplique (`pclass`, `sex`, `survived`, `min_age`, `max_age`).
 
-Examples:
-- Gender vs. Survival.
-- Class vs. Gender.
-- Survival rate by Class and Gender.
+- `GET /summary`
+  - Retorna: `total_passengers`, `survival_rate`, `avg_age`, `avg_fare`.
+- `GET /survival-by-class`
+  - Retorna arreglo de objetos `{ group, passengers, survival_rate }` agrupado por clase.
+- `GET /survival-by-sex`
+  - Retorna arreglo de objetos `{ group, passengers, survival_rate }` agrupado por sexo.
+- `GET /fare-distribution`
+  - Retorna arreglo de objetos `{ fare_bin, passengers }` por rangos de tarifa.
+- `GET /health`
+  - Healthcheck básico.
 
----
+## Frontend (Next.js + TypeScript)
 
-## 🗂️ Dataset
+### Instalación
 
-- **Source:** Titanic Dataset (CSV)
-- **Features used:**
-  - `Survived`
-  - `Pclass`
-  - `Sex`
-  - `Age`
-  - `Fare`
+```bash
+cd frontend
+npm install
+```
 
-Column names are normalized and the data is cleaned before analysis.
+### Variables de entorno
 
----
+```bash
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+```
 
-## 🛠️ Technologies Used
+### Ejecución
 
-- **Python**
-- **Pandas** – data manipulation
-- **NumPy** – numerical support
-- **Seaborn** – statistical visualization
-- **Matplotlib** – plotting
+```bash
+npm run dev
+```
 
----
+## Integración frontend/backend
 
-## 🔥 Analysis Performed
-
-### ✔ Heatmaps
-- Class vs. Survival (proportion-based)
-- Class vs. Average Ticket Fare
-
-### ✔ Cross-Tabulations
-- Gender vs. Survival (counts)
-- Class vs. Gender
-- Survival Rate (%) by Class and Gender
-
----
-
-## 🧾 Conclusions
-
-- **Women** had a higher survival rate than men.
-- Passengers in **1st and 2nd class** survived more often than those in 3rd class.
-- **3rd class men** had the lowest probability of survival.
-
-👉 Passenger survival on the Titanic was strongly influenced by **gender** and **social class**.
-
----
-
-## 📌 Author
-
-
-Camilo Coronado  
-
----
+- El frontend usa `fetch` con caché/revalidación de 5 minutos.
+- Se maneja estado de `loading` y `error` en cliente.
+- La UI tiene navegación por anclas (`Resumen`, `Clase`, `Sexo`, `Tarifa`) y toggle de tema claro/oscuro persistido en `localStorage`.
