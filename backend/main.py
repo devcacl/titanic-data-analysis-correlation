@@ -1,35 +1,20 @@
-from __future__ import annotations
-
-from functools import lru_cache
-from pathlib import Path
-from typing import Literal
-
-import pandas as pd
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+import pandas as pd
+import numpy as np
+from typing import Optional, List
 from pydantic import BaseModel
+import os
 
+# Initialize FastAPI app
+app = FastAPI(
+    title="Titanic Analytics API",
+    description="High-performance API for Titanic dataset analysis and metrics aggregation",
+    version="1.0.0"
+)
 
-class SummaryResponse(BaseModel):
-    total_passengers: int
-    survival_rate: float
-    avg_age: float | None
-    avg_fare: float | None
-
-
-class SurvivalBucket(BaseModel):
-    group: str
-    passengers: int
-    survival_rate: float
-
-
-class FareDistributionBucket(BaseModel):
-    fare_bin: str
-    passengers: int
-
-
-app = FastAPI(title="Titanic Analytics API", version="1.0.0")
-
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -38,129 +23,145 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Load Titanic dataset
+DATA_PATH = os.path.join(os.path.dirname(__file__), "../data/titanic.csv")
+df = pd.read_csv(DATA_PATH)
 
-@lru_cache(maxsize=1)
-def load_df() -> pd.DataFrame:
-    data_path = Path(__file__).parent / "data" / "titanic.csv"
-    if data_path.exists():
-        return pd.read_csv(data_path)
+# Data Models
+class SummaryMetrics(BaseModel):
+    total_passengers: int
+    survival_rate: float
+    avg_age: float
+    avg_fare: float
 
-    fallback_url = "https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv"
-    return pd.read_csv(fallback_url)
+class GroupMetrics(BaseModel):
+    group: str
+    passengers: int
+    survival_rate: float
 
+class FareDistribution(BaseModel):
+    fare_bin: str
+    passengers: int
 
-def filtered_df(
-    pclass: int | None,
-    sex: Literal["male", "female"] | None,
-    survived: int | None,
-    min_age: float | None,
-    max_age: float | None,
+# Helper function to apply filters
+def apply_filters(
+    data: pd.DataFrame,
+    pclass: Optional[int] = None,
+    sex: Optional[str] = None,
+    survived: Optional[int] = None,
+    min_age: Optional[float] = None,
+    max_age: Optional[float] = None
 ) -> pd.DataFrame:
-    df = load_df().copy()
+    """Apply optional filters to the dataset."""
+    filtered = data.copy()
+    
     if pclass is not None:
-        df = df[df["Pclass"] == pclass]
+        filtered = filtered[filtered['Pclass'] == pclass]
     if sex is not None:
-        df = df[df["Sex"] == sex]
+        filtered = filtered[filtered['Sex'] == sex.lower()]
     if survived is not None:
-        df = df[df["Survived"] == survived]
+        filtered = filtered[filtered['Survived'] == survived]
     if min_age is not None:
-        df = df[df["Age"] >= min_age]
+        filtered = filtered[filtered['Age'] >= min_age]
     if max_age is not None:
-        df = df[df["Age"] <= max_age]
-    return df
+        filtered = filtered[filtered['Age'] <= max_age]
+    
+    return filtered
 
+# Endpoints
+@app.get("/health", tags=["Health"])
+async def health_check():
+    """Standard healthcheck endpoint for orchestration and deployment monitoring."""
+    return {"status": "healthy", "service": "Titanic Analytics API"}
 
-@app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
-
-
-@app.get("/summary", response_model=SummaryResponse)
-def summary(
-    pclass: int | None = Query(default=None, ge=1, le=3),
-    sex: Literal["male", "female"] | None = None,
-    survived: int | None = Query(default=None, ge=0, le=1),
-    min_age: float | None = Query(default=None, ge=0),
-    max_age: float | None = Query(default=None, ge=0),
-) -> SummaryResponse:
-    df = filtered_df(pclass, sex, survived, min_age, max_age)
-    if df.empty:
-        return SummaryResponse(total_passengers=0, survival_rate=0, avg_age=None, avg_fare=None)
-
-    return SummaryResponse(
-        total_passengers=int(df.shape[0]),
-        survival_rate=round(float(df["Survived"].mean()) * 100, 2),
-        avg_age=round(float(df["Age"].dropna().mean()), 2) if df["Age"].notna().any() else None,
-        avg_fare=round(float(df["Fare"].dropna().mean()), 2) if df["Fare"].notna().any() else None,
-    )
-
-
-@app.get("/survival-by-class", response_model=list[SurvivalBucket])
-def survival_by_class(
-    sex: Literal["male", "female"] | None = None,
-    min_age: float | None = Query(default=None, ge=0),
-    max_age: float | None = Query(default=None, ge=0),
-) -> list[SurvivalBucket]:
-    df = filtered_df(None, sex, None, min_age, max_age)
-    if df.empty:
-        return []
-    grouped = (
-        df.groupby("Pclass")
-        .agg(passengers=("PassengerId", "count"), survival_rate=("Survived", "mean"))
-        .reset_index()
-        .sort_values("Pclass")
-    )
-    return [
-        SurvivalBucket(
-            group=f"Class {int(row.Pclass)}",
-            passengers=int(row.passengers),
-            survival_rate=round(float(row.survival_rate) * 100, 2),
-        )
-        for row in grouped.itertuples()
-    ]
-
-
-@app.get("/survival-by-sex", response_model=list[SurvivalBucket])
-def survival_by_sex(
-    pclass: int | None = Query(default=None, ge=1, le=3),
-    min_age: float | None = Query(default=None, ge=0),
-    max_age: float | None = Query(default=None, ge=0),
-) -> list[SurvivalBucket]:
-    df = filtered_df(pclass, None, None, min_age, max_age)
-    if df.empty:
-        return []
-    grouped = (
-        df.groupby("Sex")
-        .agg(passengers=("PassengerId", "count"), survival_rate=("Survived", "mean"))
-        .reset_index()
-        .sort_values("Sex")
-    )
-    return [
-        SurvivalBucket(
-            group=str(row.Sex),
-            passengers=int(row.passengers),
-            survival_rate=round(float(row.survival_rate) * 100, 2),
-        )
-        for row in grouped.itertuples()
-    ]
-
-
-@app.get("/fare-distribution", response_model=list[FareDistributionBucket])
-def fare_distribution(
-    pclass: int | None = Query(default=None, ge=1, le=3),
-    sex: Literal["male", "female"] | None = None,
-    survived: int | None = Query(default=None, ge=0, le=1),
+@app.get("/summary", response_model=SummaryMetrics, tags=["Analytics"])
+async def get_summary(
+    pclass: Optional[int] = Query(None, description="Passenger class (1, 2, or 3)"),
+    sex: Optional[str] = Query(None, description="Passenger gender (male or female)"),
+    survived: Optional[int] = Query(None, description="Survival status (0 or 1)"),
+    min_age: Optional[float] = Query(None, description="Minimum age filter"),
+    max_age: Optional[float] = Query(None, description="Maximum age filter")
 ):
-    df = filtered_df(pclass, sex, survived, None, None)
-    if df.empty:
-        return []
+    """Returns core dataset metrics (total_passengers, survival_rate, avg_age, avg_fare)."""
+    filtered = apply_filters(df, pclass, sex, survived, min_age, max_age)
+    
+    return SummaryMetrics(
+        total_passengers=len(filtered),
+        survival_rate=round(filtered['Survived'].mean(), 4) if len(filtered) > 0 else 0,
+        avg_age=round(filtered['Age'].mean(), 2) if len(filtered) > 0 else 0,
+        avg_fare=round(filtered['Fare'].mean(), 2) if len(filtered) > 0 else 0
+    )
 
-    bins = [0, 10, 25, 50, 100, 300, float("inf")]
-    labels = ["0-10", "10-25", "25-50", "50-100", "100-300", "300+"]
-    fare_bins = pd.cut(df["Fare"], bins=bins, labels=labels, right=False, include_lowest=True)
-    grouped = fare_bins.value_counts(sort=False)
+@app.get("/survival-by-class", response_model=List[GroupMetrics], tags=["Analytics"])
+async def get_survival_by_class(
+    sex: Optional[str] = Query(None, description="Passenger gender filter"),
+    survived: Optional[int] = Query(None, description="Survival status filter"),
+    min_age: Optional[float] = Query(None, description="Minimum age filter"),
+    max_age: Optional[float] = Query(None, description="Maximum age filter")
+):
+    """Aggregates data returning survival metrics grouped by passenger class."""
+    filtered = apply_filters(df, None, sex, survived, min_age, max_age)
+    
+    results = []
+    for pclass in sorted(filtered['Pclass'].unique()):
+        class_data = filtered[filtered['Pclass'] == pclass]
+        results.append(GroupMetrics(
+            group=f"Class {int(pclass)}",
+            passengers=len(class_data),
+            survival_rate=round(class_data['Survived'].mean(), 4)
+        ))
+    
+    return results
 
-    return [
-        FareDistributionBucket(fare_bin=str(label), passengers=int(grouped.get(label, 0)))
-        for label in labels
-    ]
+@app.get("/survival-by-sex", response_model=List[GroupMetrics], tags=["Analytics"])
+async def get_survival_by_sex(
+    pclass: Optional[int] = Query(None, description="Passenger class filter"),
+    survived: Optional[int] = Query(None, description="Survival status filter"),
+    min_age: Optional[float] = Query(None, description="Minimum age filter"),
+    max_age: Optional[float] = Query(None, description="Maximum age filter")
+):
+    """Aggregates data returning survival metrics grouped by gender."""
+    filtered = apply_filters(df, pclass, None, survived, min_age, max_age)
+    
+    results = []
+    for sex in sorted(filtered['Sex'].unique()):
+        sex_data = filtered[filtered['Sex'] == sex]
+        results.append(GroupMetrics(
+            group=sex.capitalize(),
+            passengers=len(sex_data),
+            survival_rate=round(sex_data['Survived'].mean(), 4)
+        ))
+    
+    return results
+
+@app.get("/fare-distribution", response_model=List[FareDistribution], tags=["Analytics"])
+async def get_fare_distribution(
+    pclass: Optional[int] = Query(None, description="Passenger class filter"),
+    sex: Optional[str] = Query(None, description="Passenger gender filter"),
+    survived: Optional[int] = Query(None, description="Survival status filter"),
+    min_age: Optional[float] = Query(None, description="Minimum age filter"),
+    max_age: Optional[float] = Query(None, description="Maximum age filter")
+):
+    """Returns passenger counts binned by fare ranges."""
+    filtered = apply_filters(df, pclass, sex, survived, min_age, max_age)
+    filtered = filtered.dropna(subset=['Fare'])
+    
+    # Create fare bins
+    bins = [0, 50, 100, 150, 200, 300, 600]
+    labels = ['$0-50', '$50-100', '$100-150', '$150-200', '$200-300', '$300+']
+    filtered['FareBin'] = pd.cut(filtered['Fare'], bins=bins, labels=labels)
+    
+    results = []
+    for label in labels:
+        bin_data = filtered[filtered['FareBin'] == label]
+        if len(bin_data) > 0:
+            results.append(FareDistribution(
+                fare_bin=label,
+                passengers=len(bin_data)
+            ))
+    
+    return results
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
